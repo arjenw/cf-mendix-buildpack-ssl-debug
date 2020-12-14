@@ -109,7 +109,7 @@ if __name__ == "__main__":
         dynatrace.update_config(m2ee, util.get_vcap_data()["application_name"])
         mx_java_agent.update_config(m2ee)
         telegraf.update_config(m2ee, util.get_vcap_data()["application_name"])
-        datadog.update_config(m2ee)
+        datadog.update_config(m2ee, is_telegraf_enabled=telegraf.is_enabled())
 
         @atexit.register
         def terminate_process():
@@ -170,7 +170,7 @@ if __name__ == "__main__":
 
         nginx.configure(m2ee)
         telegraf.run()
-        datadog.run(m2ee.config.get_runtime_version())
+        datadog.run(m2ee.config.get_runtime_version(), telegraf.is_enabled())
 
         runtime.run(m2ee)
 

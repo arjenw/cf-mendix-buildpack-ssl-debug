@@ -10,6 +10,7 @@ class TestCaseDeployWithDatadog(basetest.BaseTest):
             env_vars={
                 "DD_API_KEY": "NON-VALID-TEST-KEY",
                 "DD_TRACE_ENABLED": "true",
+                "TAGS": json.dumps(["app:testapp", "env:test"]),
             },
         )
         self.start_container()
@@ -33,8 +34,12 @@ class TestCaseDeployWithDatadog(basetest.BaseTest):
         assert output is not None
         assert str(output).find(agent_string) >= 0
 
+    def _test_dd_tags(self):
+        self.assert_string_in_recent_logs("'DD_TAGS': 'app:testapp,env:test'")
+
     def _test_datadog(self, mda_file):
         self._test_datadog_running(mda_file)
+        self._test_dd_tags()
         self._test_logsubscriber_active()
 
     def _test_logsubscriber_active(self):

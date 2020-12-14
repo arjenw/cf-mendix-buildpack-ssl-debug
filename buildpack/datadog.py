@@ -21,31 +21,37 @@ from buildpack.runtime_components import database
 NAMESPACE = "datadog"
 
 SIDECAR_VERSION = "v0.22.2"
-SIDECAR_ARCHIVE = "cf-datadog-sidecar-{}.tar.gz".format(SIDECAR_VERSION)
-JAVA_AGENT_VERSION = "0.68.0"
-JAVA_AGENT_JAR = "dd-java-agent-{}.jar".format(JAVA_AGENT_VERSION)
+SIDECAR_ARTIFACT_NAME = "cf-datadog-sidecar-{}.tar.gz".format(SIDECAR_VERSION)
 SIDECAR_URL_ROOT = "/mx-buildpack/{}".format(NAMESPACE)
+JAVA_AGENT_VERSION = "0.68.0"
+JAVA_AGENT_ARTIFACT_NAME = "dd-java-agent-{}.jar".format(JAVA_AGENT_VERSION)
 JAVA_AGENT_URL_ROOT = "/mx-buildpack/{}".format(NAMESPACE)
 
 ROOT_DIR = os.path.abspath(".local")
 SIDECAR_ROOT_DIR = os.path.join(ROOT_DIR, NAMESPACE)
 AGENT_DIR = os.path.join(SIDECAR_ROOT_DIR, "datadog")
-AGENT_CONF_DIR = os.path.join(AGENT_DIR, "etc", "datadog-agent")
-AGENT_CONFD_DIR = os.path.join(AGENT_CONF_DIR, "conf.d")
-AGENT_CHECKS_CONF_DIR = os.path.abspath("/home/vcap/app/datadog_integrations")
+AGENT_USER_CHECKS_DIR = os.path.abspath("/home/vcap/app/datadog_integrations")
 
 LOGS_PORT = 9032
 
+# Returns the directory additional agent checks can be put into
+# Can be used by other modules to set up e.g. JMX checks
+def get_user_checks_dir():
+    os.makedirs(AGENT_USER_CHECKS_DIR, exist_ok=True)
+    return AGENT_USER_CHECKS_DIR
 
+
+# Returns the Datadog API key in use
 def get_api_key():
     return os.getenv("DD_API_KEY")
 
 
+# Returns whether Datadog is enabled
 def is_enabled():
     return get_api_key() is not None
 
 
-def _is_dd_tracing_enabled():
+def _is_tracing_enabled():
     return strtobool(os.environ.get("DD_TRACE_ENABLED", "false"))
 
 
@@ -54,27 +60,48 @@ def _is_installed():
 
 
 def _get_service():
-    return os.environ.get("DD_SERVICE_NAME", _get_application())
-
-
-def _get_application():
-    app_tags = list(filter(lambda x: "app:" in x, util.get_tags()))
-    if app_tags:
-        return app_tags[0].split(":")[1]
+    dd_service_name = os.environ.get("DD_SERVICE_NAME")
+    if dd_service_name:
+        return dd_service_name
     else:
-        return util.get_appname()
+        service_from_tags = _get_service_from_tags()
+        if service_from_tags:
+            return service_from_tags
+    return util.get_app_from_domain()
 
 
-def _get_statsd_port():
-    if util.is_appmetrics_enabled():
+def _get_service_from_tags():
+    service_tags = sorted(
+        list(filter(lambda x: "service:" or "app:" in x, util.get_tags())),
+        reverse=True,
+    )
+    if service_tags:
+        return service_tags[0].split(":")[1]
+    return None
+
+
+# Appends user tags with mandatory tags if required
+def _get_datadog_tags():
+    tags = util.get_tags()
+
+    if not _get_service_from_tags():
+        # app and / or service tag not set
+        tags.append("service:{}".format(util.get_app_from_domain()))
+
+    return ",".join(tags)
+
+
+def _get_statsd_port(is_telegraf_enabled):
+    if is_telegraf_enabled:
+        # Telegraf is already enabled
         return 18125
     else:
         return 8125
 
 
 def _enable_dd_java_agent(m2ee):
-    if _is_dd_tracing_enabled():
-        jar = os.path.join(SIDECAR_ROOT_DIR, JAVA_AGENT_JAR)
+    if _is_tracing_enabled():
+        jar = os.path.join(SIDECAR_ROOT_DIR, JAVA_AGENT_ARTIFACT_NAME)
 
         # Check if already configured
         if 0 in [
@@ -83,9 +110,29 @@ def _enable_dd_java_agent(m2ee):
         ]:
             return
 
+        # Extend with tracing options
         m2ee.config._conf["m2ee"]["javaopts"].extend(
-            ["-javaagent:{}".format(jar)]
+            [
+                "-javaagent:{}".format(jar),
+                "-D{}={}".format("dd.service", _get_service()),
+                "-D{}={}".format("dd.logs.injection", "true"),
+                "-D{}={}".format("dd.jmxfetch.enabled", "false"),
+            ]
         )
+
+        # Extend with database service mapping
+        dbconfig = database.get_config()
+        if dbconfig:
+            m2ee.config._conf["m2ee"]["javaopts"].extend(
+                [
+                    "-D{}={}".format(
+                        "dd.service.mapping",
+                        "{}:{}.db".format(
+                            dbconfig["DatabaseType"].lower(), _get_service()
+                        ),
+                    ),
+                ]
+            )
 
 
 def _is_database_diskstorage_enabled():
@@ -99,9 +146,9 @@ def _set_up_database_diskstorage():
     # This check is a very dirty workaround
     # and makes an environment variable into a gauge with a fixed value.
     if _is_database_diskstorage_enabled():
-        os.makedirs(AGENT_CHECKS_CONF_DIR, exist_ok=True)
         with open(
-            AGENT_CHECKS_CONF_DIR + "/mx_database_diskstorage.yml", "w"
+            os.path.join(get_user_checks_dir(), "mx_database_diskstorage.yml"),
+            "w",
         ) as fh:
             config = {
                 "init_config": {},
@@ -110,8 +157,10 @@ def _set_up_database_diskstorage():
             fh.write(yaml.safe_dump(config))
 
 
-def _set_up_jmx():
-    runtime_jmx_dir = AGENT_CHECKS_CONF_DIR + "/jmx.d"
+def _set_up_jmx(statsd_port, extra_jmx_instance_config=None):
+    jmx_check_conf_dir = os.path.join(get_user_checks_dir(), "jmx.d")
+    jmx_check_conf_file = os.path.join(jmx_check_conf_dir, "conf.yaml")
+
     # JMX beans and values can be inspected with jmxterm
     # Download the jmxterm jar into the container
     # and run app/.local/bin/java -jar ~/jmxterm.jar
@@ -125,7 +174,7 @@ def _set_up_jmx():
                 "port": 7845,
                 "java_bin_path": str(os.path.abspath(".local/bin/java")),
                 "java_options": "-Xmx50m -Xms5m",
-                "reporter": "statsd:localhost:{}".format(_get_statsd_port()),
+                "reporter": "statsd:localhost:{}".format(statsd_port),
                 "refresh_beans": 120,  # runtime takes time to initialize the beans
                 "conf": [
                     {
@@ -201,36 +250,50 @@ def _set_up_jmx():
         ],
     }
 
+    # This section should be moved to the Databroker module itself
     if is_databroker_enabled():
         if is_databroker_producer_app():
-            runtime_jmx_dir = AGENT_CHECKS_CONF_DIR + "/jmx_1.d"
+            jmx_check_conf_dir = os.path.join(get_user_checks_dir(), "jmx_1.d")
 
             # kafka connect cfg
-            os.makedirs(AGENT_CHECKS_CONF_DIR + "/jmx_2.d", exist_ok=True)
+            os.makedirs(
+                os.path.join(get_user_checks_dir(), "jmx_2.d"), exist_ok=True
+            )
             kafka_connect_cfg = (
                 jmx_cfg_generator.generate_kafka_connect_jmx_config()
             )
             write_file(
-                AGENT_CHECKS_CONF_DIR + "/jmx_2.d/conf.yaml", kafka_connect_cfg
+                os.path.join(get_user_checks_dir(), "jmx_2.d", "conf.yaml"),
+                kafka_connect_cfg,
             )
 
             # kafka streams cfg
-            os.makedirs(AGENT_CHECKS_CONF_DIR + "/jmx_3.d", exist_ok=True)
+            os.makedirs(
+                os.path.join(get_user_checks_dir(), "jmx_3.d"), exist_ok=True
+            )
             kafka_streams_cfg = (
                 jmx_cfg_generator.generate_kafka_streams_jmx_config()
             )
             write_file(
-                AGENT_CHECKS_CONF_DIR + "/jmx_3.d/conf.yaml", kafka_streams_cfg
+                os.path.join(get_user_checks_dir(), "jmx_3.d", "conf.yaml"),
+                kafka_streams_cfg,
             )
         else:
-            config["instances"][0]["conf"].extend(consumer.jmx_metrics)
+            extra_jmx_instance_config = consumer.jmx_metrics
 
-    os.makedirs(runtime_jmx_dir, exist_ok=True)
-    with open(runtime_jmx_dir + "/conf.yaml", "w") as fh:
+    # Merge extra instance configuration
+    if extra_jmx_instance_config:
+        config["instances"][0]["conf"].extend(extra_jmx_instance_config)
+
+    # Write JMX configuration file
+    os.makedirs(jmx_check_conf_dir, exist_ok=True)
+    with open(jmx_check_conf_file, "w") as fh:
         fh.write(yaml.safe_dump(config))
 
 
-def _set_up_postgres():
+def _set_up_postgres(is_telegraf_enabled):
+    if is_telegraf_enabled:
+        return
     # TODO: set up a way to disable this, on shared database (mxapps.io) we
     # don't want to allow this.
     if not util.i_am_primary_instance():
@@ -253,8 +316,13 @@ def _set_up_postgres():
         if dbconfig["DatabaseType"] != "PostgreSQL":
             return
 
-        os.makedirs(AGENT_CHECKS_CONF_DIR + "/postgres.d", exist_ok=True)
-        with open(AGENT_CHECKS_CONF_DIR + "/postgres.d/conf.yaml", "w") as fh:
+        postgres_check_conf_dir = os.path.join(
+            get_user_checks_dir, "postgres.d"
+        )
+        os.makedirs(postgres_check_conf_dir, exist_ok=True)
+        with open(
+            os.path.join(postgres_check_conf_dir, "conf.yaml"), "w"
+        ) as fh:
             config = {
                 "init_config": {},
                 "instances": [
@@ -270,18 +338,10 @@ def _set_up_postgres():
             fh.write(yaml.safe_dump(config))
 
 
-def _set_up_environment():
+def _set_up_environment(statsd_port):
 
     # Trace variables need to be set in the global environment
     # since the Datadog Java Trace Agent does not live inside the Datadog Agent process
-    if _is_dd_tracing_enabled():
-        os.environ["DD_SERVICE_NAME"] = _get_service()
-        os.environ["DD_JMXFETCH_ENABLED"] = "false"
-        dbconfig = database.get_config()
-        if dbconfig:
-            os.environ["DD_SERVICE_MAPPING"] = "{}:{}.db".format(
-                dbconfig["DatabaseType"].lower(), _get_service()
-            )
 
     e = dict(os.environ.copy())
 
@@ -291,22 +351,27 @@ def _set_up_environment():
     e["DD_HOSTNAME"] = util.get_hostname()
 
     # Explicitly turn off tracing to ensure backward compatibility
-    if not _is_dd_tracing_enabled():
+    if not _is_tracing_enabled():
         e["DD_TRACE_ENABLED"] = "false"
     e["DD_LOGS_ENABLED"] = "true"
     e["DD_LOG_FILE"] = "/dev/null"
     e["DD_PROCESS_CONFIG_LOG_FILE"] = "/dev/null"
-    e["DD_DOGSTATSD_PORT"] = str(_get_statsd_port())
+    e["DD_DOGSTATSD_PORT"] = str(statsd_port)
 
-    # Enable configured checks
+    # Transform and append tags
+    e["DD_TAGS"] = _get_datadog_tags()
+    del e["TAGS"]
+
+    # Set Mendix Datadog sidecar specific environment variables
     e["DD_ENABLE_USER_CHECKS"] = "true"
-
     e["DATADOG_DIR"] = str(AGENT_DIR)
 
     return e
 
 
-def update_config(m2ee):
+def update_config(
+    m2ee, is_telegraf_enabled=False, extra_jmx_instance_config=None
+):
     if (
         not is_enabled()
         or not _is_installed()
@@ -344,39 +409,42 @@ def update_config(m2ee):
     # if tracing is explicitly enabled
     _enable_dd_java_agent(m2ee)
 
-    # Set up Mendix checks
+    # Set up Mendix checks (database diskstorage and logging)
     _set_up_database_diskstorage()
-    os.makedirs(AGENT_CHECKS_CONF_DIR + "/mendix.d", exist_ok=True)
-    with open(AGENT_CHECKS_CONF_DIR + "/mendix.d/conf.yaml", "w") as fh:
+    logs_check_conf_dir = os.path.join(get_user_checks_dir(), "mendix.d")
+    os.makedirs(logs_check_conf_dir, exist_ok=True)
+    with open(os.path.join(logs_check_conf_dir, "conf.yaml"), "w") as fh:
         config = {
             "logs": [
                 {
                     "type": "tcp",
                     "port": str(LOGS_PORT),
-                    "service": _get_service(),
                     "source": "mendix",
-                    "tags": util.get_tags(),
+                    "service": _get_service(),
                 }
             ]
         }
         fh.write(yaml.safe_dump(config))
 
     # Set up embedded checks
-    _set_up_jmx()
-    _set_up_postgres()
+    _set_up_jmx(
+        statsd_port=_get_statsd_port(is_telegraf_enabled),
+        extra_jmx_instance_config=extra_jmx_instance_config,
+    )
+    _set_up_postgres(is_telegraf_enabled)
 
 
 def _download(build_path, cache_dir):
     util.download_and_unpack(
         util.get_blobstore_url(
-            "{}/{}".format(SIDECAR_URL_ROOT, SIDECAR_ARCHIVE)
+            "{}/{}".format(SIDECAR_URL_ROOT, SIDECAR_ARTIFACT_NAME)
         ),
         os.path.join(build_path, NAMESPACE),
         cache_dir=cache_dir,
     )
     util.download_and_unpack(
         util.get_blobstore_url(
-            "{}/{}".format(JAVA_AGENT_URL_ROOT, JAVA_AGENT_JAR)
+            "{}/{}".format(JAVA_AGENT_URL_ROOT, JAVA_AGENT_ARTIFACT_NAME)
         ),
         os.path.join(build_path, NAMESPACE),
         cache_dir=cache_dir,
@@ -408,7 +476,7 @@ def stage(buildpack_path, build_path, cache_path):
     _copy_files(buildpack_path, build_path)
 
 
-def run(runtime_version):
+def run(runtime_version, is_telegraf_enabled=False):
     if not is_enabled():
         return
 
@@ -428,8 +496,17 @@ def run(runtime_version):
 
     # Start the run script "borrowed" from the official DD buildpack
     # and include settings as environment variables
+    agent_environment = _set_up_environment(
+        _get_statsd_port(is_telegraf_enabled)
+    )
+    logging.debug(
+        "Datadog Agent environment variables: [{}]".format(agent_environment)
+    )
+
     logging.info("Starting Datadog Agent...")
-    subprocess.Popen(AGENT_DIR + "/run-datadog.sh", env=_set_up_environment())
+    subprocess.Popen(
+        os.path.join(AGENT_DIR, "run-datadog.sh"), env=agent_environment
+    )
 
     # The runtime does not handle a non-open logs endpoint socket
     # gracefully, so wait until it's up

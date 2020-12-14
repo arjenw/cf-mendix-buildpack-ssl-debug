@@ -31,17 +31,13 @@ def get_vcap_data():
         return json.loads(os.environ.get("VCAP_APPLICATION"))
     else:
         return {
-            "application_uris": ["example.com"],
-            "application_name": "My App",
+            "application_uris": ["app.mendixcloud.com"],
+            "application_name": "Mendix App",
         }
 
 
-def is_appmetrics_enabled():
-    return os.getenv("APPMETRICS_TARGET") is not None
-
-
 def get_tags():
-    return json.loads(os.getenv("TAGS", os.getenv("DD_TAGS", "[]")))
+    return json.loads(os.getenv("TAGS", "[]"))
 
 
 def get_domain():
@@ -49,16 +45,11 @@ def get_domain():
 
 
 def get_hostname():
-    dd_hostname = os.environ.get("DD_HOSTNAME")
-    if dd_hostname is None:
-        dd_hostname = get_domain() + "-" + os.getenv("CF_INSTANCE_INDEX", "")
-    return dd_hostname
+    return get_domain() + "-" + os.getenv("CF_INSTANCE_INDEX", "")
 
 
-def get_appname():
-    return "".join(
-        filter(lambda x: not x.isdigit(), get_domain().split("-")[0])
-    )
+def get_app_from_domain():
+    return get_domain().split(".")[0]
 
 
 def get_blobstore_url(filename):
@@ -155,13 +146,7 @@ def download_and_unpack(
 
 
 def mkdir_p(path):
-    try:
-        os.makedirs(path)
-    except OSError as e:
-        if e.errno == errno.EEXIST and os.path.isdir(path):
-            pass
-        else:
-            raise
+    os.makedirs(path, exist_ok=True)
 
 
 def get_buildpack_loglevel():
