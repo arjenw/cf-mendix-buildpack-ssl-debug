@@ -360,7 +360,8 @@ def _set_up_environment(statsd_port):
 
     # Transform and append tags
     e["DD_TAGS"] = _get_datadog_tags()
-    del e["TAGS"]
+    if "TAGS" in e:
+        del e["TAGS"]
 
     # Set Mendix Datadog sidecar specific environment variables
     e["DD_ENABLE_USER_CHECKS"] = "true"
