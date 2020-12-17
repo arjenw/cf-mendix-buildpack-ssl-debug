@@ -398,8 +398,9 @@ The Datadog integration features a full Datadog Agent installation inspired by t
 
 For correlation purposes, we set the Datadog `service` for you to match your **application name**. This name is derived in the following order:
 
-1. Your Mendix `app:` tag if you have set this in the runtime settings.<br/>*Example:* for `app:myfirstapp` , `service` will be set to `myfirstapp` .
-2. The first part of the Cloud Foundry route URI configured for your application, without numeric characters.<br/>*Example:* for a route URI `myfirstapp1000-test.example.com` , `service` will be set to `myfirstapp` .
+1. Your Mendix `service:` tag if you have set this in the runtime settings or `TAGS` environment variable.<br/>*Format:* `["service:myfirstapp", "tag2:value2", ...]`.
+2. Your Mendix `app:` tag if you have set this in the runtime settings or `TAGS` environment variable.<br/>*Example:* for `app:myfirstapp` , `service` will be set to `myfirstapp`.
+3. The first part of the Cloud Foundry route URI configured for your application, without numeric characters.<br/>*Example:* for a route URI `myfirstapp1000-test.example.com` , `service` will be set to `myfirstapp` .
 
 Additionally, we configure the following Datadog environment variables for you:
 
@@ -411,7 +412,7 @@ Additionally, we configure the following Datadog environment variables for you:
 | `DD_LOGS_ENABLED` | `true` | No | Enables sending your application logs directly to Datadog |
 | `DD_SERVICE_MAPPING` | `<database>:<app>.db` | No | Links your database to your app in Datadog APM. Is only set when `DD_TRACE_ENABLED` is set to `true` . |
 | `DD_SERVICE_NAME` | `<app>` | No | Defaults to your application name as described before. Is only set when `DD_TRACE_ENABLED` is set to `true` . |
-| `DD_TAGS` | Various Cloud Foundry tags | Yes | If set, your tags will be added to the list of supplied Cloud Foundry tags |
+| `DD_TAGS` | `tag1:value1,...:...` | No | Derived from the runtime settings in Mendix Public Cloud or the `TAGS` environment variable |
 | `DD_TRACE_ENABLED` | `false` | Yes | Disables Datadog APM by default. **Enabling Datadog APM is experimental and enables the [Datadog Java Trace Agent](https://docs.datadoghq.com/tracing/setup/java/) alongside the Mendix Java Agent.** |
 
 The `DD_LOG_FILE` , `DD_PROCESS_CONFIG_LOG_FILE` and `DD_DOGSTATSD_PORT` environment variables are also configured specifically with buildpack-specific system values. Other environment variables can be set as per the [Datadog Agent documentation](https://docs.datadoghq.com/agent/).
