@@ -84,13 +84,20 @@ def _get_service_from_tags():
     return None
 
 
+def _tag_exists(tag):
+    tags = list(filter(lambda x: "{}:".format(tag) in x, util.get_tags()))
+    if tags:
+        return True
+    return False
+
+
 # Appends user tags with mandatory tags if required
 def _get_datadog_tags():
     tags = util.get_tags()
 
-    if not _get_service_from_tags():
+    if not _tag_exists("service"):
         # app and / or service tag not set
-        tags.append("service:{}".format(util.get_app_from_domain()))
+        tags.append("service:{}".format(_get_service()))
 
     return ",".join(tags)
 
