@@ -15,7 +15,7 @@ from buildpack import (
     newrelic,
     nginx,
     runtime,
-    telegraf,
+    metrics_agent,
     util,
 )
 from buildpack.runtime_components import database
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     dynatrace.stage(DOT_LOCAL_LOCATION, CACHE_DIR)
     newrelic.stage(DOT_LOCAL_LOCATION, CACHE_DIR)
     mx_java_agent.stage(DOT_LOCAL_LOCATION, CACHE_DIR)
-    telegraf.stage(DOT_LOCAL_LOCATION, CACHE_DIR)
+    metrics_agent.stage(DOT_LOCAL_LOCATION, CACHE_DIR)
     datadog.stage(BUILDPACK_DIR, DOT_LOCAL_LOCATION, CACHE_DIR)
     runtime.stage(BUILDPACK_DIR, BUILD_DIR, CACHE_DIR)
     databroker.stage(DOT_LOCAL_LOCATION, CACHE_DIR)

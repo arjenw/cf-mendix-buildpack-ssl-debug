@@ -36,10 +36,6 @@ def get_vcap_data():
         }
 
 
-def get_tags():
-    return json.loads(os.getenv("TAGS", "[]"))
-
-
 def get_domain():
     return get_vcap_data()["application_uris"][0].split("/")[0]
 

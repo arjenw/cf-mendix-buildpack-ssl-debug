@@ -24,7 +24,7 @@ from buildpack import (
     newrelic,
     nginx,
     runtime,
-    telegraf,
+    metrics_agent,
     util,
 )
 
@@ -108,8 +108,8 @@ if __name__ == "__main__":
         )
         dynatrace.update_config(m2ee, util.get_vcap_data()["application_name"])
         mx_java_agent.update_config(m2ee)
-        telegraf.update_config(m2ee, util.get_vcap_data()["application_name"])
-        datadog.update_config(m2ee, is_telegraf_enabled=telegraf.is_enabled())
+        metrics_agent.update_config(m2ee, util.get_vcap_data()["application_name"])
+        datadog.update_config(m2ee)
 
         @atexit.register
         def terminate_process():
@@ -169,8 +169,8 @@ if __name__ == "__main__":
         signal.signal(signal.SIGUSR2, sigusr_handler)
 
         nginx.configure(m2ee)
-        telegraf.run()
-        datadog.run(m2ee.config.get_runtime_version(), telegraf.is_enabled())
+        metrics_agent.run()
+        datadog.run(m2ee.config.get_runtime_version())
 
         runtime.run(m2ee)
 

@@ -2,7 +2,7 @@ import logging
 import json
 import os
 
-from buildpack import util, datadog, telegraf
+from buildpack import util, metrics_agent
 
 NAMESPACE = "mx-agent"
 ARTIFACT = "mx-agent-v0.12.0.jar"
@@ -10,7 +10,7 @@ ROOT_DIR = ".local"
 
 
 def is_enabled():
-    return datadog.is_enabled() or telegraf.is_enabled()
+    return metrics_agent.is_enabled()
 
 
 def _get_destination_dir(dot_local=ROOT_DIR):

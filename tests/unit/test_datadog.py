@@ -12,11 +12,9 @@ class TestCaseDatadogUtilFunctions:
             (
                 [
                     "app:testapp",
-                    "service:testservice2",
                     "service:testservice",
-                    "app:testapp2",
                 ],
-                "testservice2",
+                "testservice",
             ),
             (["app:testapp"], "testapp"),
             (["service:testservice"], "testservice"),
