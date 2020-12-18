@@ -10,4 +10,3 @@ class TestCaseTelegraf(basetest.BaseTest):
         self.start_container()
         self.assert_app_running()
         self.assert_listening_on_port(8125, "telegraf")
-        

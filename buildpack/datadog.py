@@ -1,7 +1,9 @@
+import glob
+import json
 import logging
 import os
-import shutil
 import socket
+import stat
 import subprocess
 from collections import OrderedDict
 from distutils.util import strtobool
@@ -14,8 +16,10 @@ from buildpack.runtime_components import database
 
 NAMESPACE = "datadog"
 
-SIDECAR_VERSION = "v0.22.2"
-SIDECAR_ARTIFACT_NAME = "cf-datadog-sidecar-{}.tar.gz".format(SIDECAR_VERSION)
+SIDECAR_VERSION = "4.19.0"
+SIDECAR_ARTIFACT_NAME = "datadog-cloudfoundry-buildpack-{}.zip".format(
+    SIDECAR_VERSION
+)
 SIDECAR_URL_ROOT = "/mx-buildpack/{}".format(NAMESPACE)
 JAVA_AGENT_VERSION = "0.68.0"
 JAVA_AGENT_ARTIFACT_NAME = "dd-java-agent-{}.jar".format(JAVA_AGENT_VERSION)
@@ -23,7 +27,7 @@ JAVA_AGENT_URL_ROOT = "/mx-buildpack/{}".format(NAMESPACE)
 
 ROOT_DIR = os.path.abspath(".local")
 SIDECAR_ROOT_DIR = os.path.join(ROOT_DIR, NAMESPACE)
-AGENT_DIR = os.path.join(SIDECAR_ROOT_DIR, "datadog")
+AGENT_DIR = os.path.join(SIDECAR_ROOT_DIR, "lib")
 AGENT_USER_CHECKS_DIR = os.path.abspath("/home/vcap/app/datadog_integrations")
 
 STATSD_PORT = 18125
@@ -283,7 +287,6 @@ def _set_up_environment():
     e["DD_API_KEY"] = get_api_key()
     e["DD_HOSTNAME"] = util.get_hostname()
 
-    e["DD_LOGS_ENABLED"] = "true"
     e["DD_LOG_FILE"] = "/dev/null"
     e["DD_PROCESS_CONFIG_LOG_FILE"] = "/dev/null"
     e["DD_DOGSTATSD_PORT"] = str(_get_statsd_port())
@@ -294,31 +297,27 @@ def _set_up_environment():
         del e["TAGS"]
 
     # Set Mendix Datadog sidecar specific environment variables
-    e["DD_ENABLE_USER_CHECKS"] = "true"
-    e["DATADOG_DIR"] = str(AGENT_DIR)
+    # e["DD_ENABLE_USER_CHECKS"] = "true"
 
     # Set Datadog Cloud Foundry Buildpack specific environment variables
-    # cf set-env $YOUR_APP_NAME RUN_AGENT true
-    # cf set-env $YOUR_APP_NAME DD_LOGS_ENABLED true
-    # # Disable the Agent core checks to disable system metrics collection
-    # cf set-env $YOUR_APP_NAME DD_ENABLE_CHECKS false
-    # # Configure the agent to collect logs from the wanted port and set the value for source and service
-    # cf set-env $YOUR_APP_NAME LOGS_CONFIG '[{"type":"tcp","port":"<PORT>","source":"<SOURCE>","service":"<SERVICE>"}]'
+    e["DATADOG_DIR"] = str(AGENT_DIR)
+    e["RUN_AGENT"] = "true"
+    e["DD_LOGS_ENABLED"] = "true"
+    e["DD_ENABLE_CHECKS"] = "false"
+    e["LOGS_CONFIG"] = json.dumps(_get_logging_config())
 
     return e
 
 
 def _get_logging_config():
-    config = {
-        "logs": [
-            {
-                "type": "tcp",
-                "port": str(LOGS_PORT),
-                "source": "mendix",
-                "service": _get_service(),
-            }
-        ]
-    }
+    config = [
+        {
+            "type": "tcp",
+            "port": str(LOGS_PORT),
+            "source": "mendix",
+            "service": _get_service(),
+        }
+    ]
 
     if _is_logs_redaction_enabled():
         logging.info(
@@ -334,7 +333,7 @@ def _get_logging_config():
                 }
             ]
         }
-        config["logs"][0] = {**config["logs"][0], **log_processing_rules}
+        config[0] = {**config[0], **log_processing_rules}
 
     return config
 
@@ -408,13 +407,6 @@ def update_config(m2ee, extra_jmx_instance_config=None, jmx_config_files=[]):
         m2ee, jmx_config_files=jmx_config_files,
     )
 
-    # Set up Mendix checks (logging)
-    # TODO: remove in favour of Datadog buildpack environment variable
-    logs_check_conf_dir = os.path.join(_get_user_checks_dir(), "mendix.d")
-    os.makedirs(logs_check_conf_dir, exist_ok=True)
-    with open(os.path.join(logs_check_conf_dir, "conf.yaml"), "w") as fh:
-        fh.write(yaml.safe_dump(_get_logging_config()))
-
 
 def _download(build_path, cache_dir):
     util.download_and_unpack(
@@ -423,6 +415,7 @@ def _download(build_path, cache_dir):
         ),
         os.path.join(build_path, NAMESPACE),
         cache_dir=cache_dir,
+        alias="cf-datadog-sidecar",  # Removes the old sidecar if present
     )
     util.download_and_unpack(
         util.get_blobstore_url(
@@ -434,29 +427,19 @@ def _download(build_path, cache_dir):
     )
 
 
-def _copy_files(buildpack_path, build_path):
-    file_name = "mx_database_diskstorage.py"
-    shutil.copyfile(
-        os.path.join(buildpack_path, "etc", NAMESPACE, "checks.d", file_name),
-        os.path.join(
-            build_path,
-            NAMESPACE,
-            "datadog",
-            "etc",
-            "datadog-agent",
-            "checks.d",
-            file_name,
-        ),
-    )
-
-
 def stage(buildpack_path, build_path, cache_path):
     if not is_enabled():
         return
 
     logging.debug("Staging Datadog...")
     _download(build_path, cache_path)
-    _copy_files(buildpack_path, build_path)
+
+    logging.debug("Setting permissions...")
+    files = glob.glob(("{}/*.sh").format(AGENT_DIR))
+    for exec_file in files:
+        logging.debug("Setting [{}] to be executable...".format(exec_file))
+        st = os.stat(exec_file)
+        os.chmod(exec_file, st.st_mode | stat.S_IEXEC)
 
 
 def run(runtime_version):
@@ -479,12 +462,13 @@ def run(runtime_version):
 
     # Start the run script "borrowed" from the official DD buildpack
     # and include settings as environment variables
+    logging.info("Starting Datadog Agent...")
+
     agent_environment = _set_up_environment()
     logging.debug(
         "Datadog Agent environment variables: [{}]".format(agent_environment)
     )
 
-    logging.info("Starting Datadog Agent...")
     subprocess.Popen(
         os.path.join(AGENT_DIR, "run-datadog.sh"), env=agent_environment
     )

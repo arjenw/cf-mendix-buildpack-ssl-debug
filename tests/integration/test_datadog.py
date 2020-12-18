@@ -30,7 +30,9 @@ class TestCaseDeployWithDatadog(basetest.BaseTest):
         self.assert_listening_on_port(9032, "agent")
 
     def _test_dd_tags(self):
-        self.assert_string_in_recent_logs("'DD_TAGS': 'app:testapp,env:test,service:testapp'")
+        self.assert_string_in_recent_logs(
+            "'DD_TAGS': 'app:testapp,env:test,service:testapp'"
+        )
 
     def _test_datadog(self, mda_file):
         self._test_datadog_running(mda_file)
@@ -52,17 +54,16 @@ class TestCaseDeployWithDatadog(basetest.BaseTest):
 
     def test_datadog_mx7(self):
         self._test_datadog("BuildpackTestApp-mx-7-16.mda")
-        print(self.get_recent_logs())
 
-    # def test_datadog_mx8(self):
-    #     self._test_datadog("Mendix8.1.1.58432_StarterApp.mda")
+    def test_datadog_mx8(self):
+        self._test_datadog("Mendix8.1.1.58432_StarterApp.mda")
 
-    # def test_datadog_failure_mx6(self):
-    #     self.stage_container(
-    #         "sample-6.2.0.mda", env_vars={"DD_API_KEY": "NON-VALID-TEST-KEY"}
-    #     )
-    #     self.start_container()
-    #     self.assert_app_running()
-    #     self.assert_string_in_recent_logs(
-    #         "Datadog integration requires Mendix 7.14 or newer"
-    #     )
+    def test_datadog_failure_mx6(self):
+        self.stage_container(
+            "sample-6.2.0.mda", env_vars={"DD_API_KEY": "NON-VALID-TEST-KEY"}
+        )
+        self.start_container()
+        self.assert_app_running()
+        self.assert_string_in_recent_logs(
+            "Datadog integration requires Mendix 7.14 or newer"
+        )

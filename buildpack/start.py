@@ -108,7 +108,9 @@ if __name__ == "__main__":
         )
         dynatrace.update_config(m2ee, util.get_vcap_data()["application_name"])
         mx_java_agent.update_config(m2ee)
-        metrics_agent.update_config(m2ee, util.get_vcap_data()["application_name"])
+        metrics_agent.update_config(
+            m2ee, util.get_vcap_data()["application_name"]
+        )
         datadog.update_config(m2ee)
 
         @atexit.register

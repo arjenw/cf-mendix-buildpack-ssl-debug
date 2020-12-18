@@ -210,7 +210,7 @@ def update_config(m2ee, app_name):
             "delete_timings": True,
             "percentiles": [90],
             "metric_separator": ".",
-            "parse_data_dog_tags": True,
+            "datadog_extensions": True,
             "allowed_pending_messages": 10000,
             "percentile_limit": 1000,
         },
@@ -221,8 +221,7 @@ def update_config(m2ee, app_name):
         db_config = database.get_config()
         if db_config and db_config["DatabaseType"] == "PostgreSQL":
             # TODO: check if we need to change the metric name for Datadog compatibility
-            return
-            _write_config(
+            return _write_config(
                 "[[inputs.postgresql]]",
                 {
                     "address": "postgres://{}:{}@{}/{}".format(

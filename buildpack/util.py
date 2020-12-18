@@ -55,22 +55,25 @@ def get_blobstore_url(filename):
     return main_url + filename
 
 
-def _delete_other_versions(directory, file_name):
+def _delete_other_versions(directory, file_name, alias=None):
     logging.debug(
-        "Deleting other versions than [{}] from [{}]...".format(
+        "Deleting other dependency versions than [{}] from [{}]...".format(
             file_name, directory
         )
     )
     expression = r"^((?:[a-zA-Z]+-)+)((?:v*[0-9]+\.?)+.*)(\.(?:tar|tar\.gz|tgz|zip|jar))$"
-    pattern = re.sub(expression, "\\1*\\3", file_name)
+    patterns = [re.sub(expression, "\\1*\\3", file_name)]
+    if alias:
+        patterns.append("{}-*.*".format(alias))
 
-    if pattern:
+    for pattern in patterns:
+        logging.debug("Finding files matching [{}]...".format(pattern))
         files = glob.glob("{}/{}".format(directory, pattern))
 
         for f in files:
             if os.path.basename(f) != file_name:
                 logging.debug(
-                    "Deleting version {} from {}...".format(
+                    "Deleting dependency version {} from {}...".format(
                         os.path.basename(f), directory
                     )
                 )
@@ -78,14 +81,14 @@ def _delete_other_versions(directory, file_name):
 
 
 def download_and_unpack(
-    url, destination, cache_dir="/tmp/downloads", unpack=True
+    url, destination, cache_dir="/tmp/downloads", unpack=True, alias=None
 ):
     file_name = url.split("/")[-1]
     mkdir_p(cache_dir)
     mkdir_p(destination)
     cached_location = os.path.join(cache_dir, file_name)
 
-    _delete_other_versions(cache_dir, file_name)
+    _delete_other_versions(cache_dir, file_name, alias)
 
     logging.debug(
         "Looking for [{cached_location}] in cache...".format(
@@ -120,7 +123,7 @@ def download_and_unpack(
             ):
                 unpack_cmd.extend(("--strip", "1"))
         else:
-            unpack_cmd = ["unzip", cached_location, "-d", destination]
+            unpack_cmd = ["unzip", "-q", cached_location, "-d", destination]
 
         if unpack_cmd:
             subprocess.check_call(unpack_cmd)
