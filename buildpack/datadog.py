@@ -370,37 +370,6 @@ def update_config(m2ee, extra_jmx_instance_config=None, jmx_config_files=[]):
             )
         )
 
-    # This section should be moved to the Databroker module itself
-    # if is_databroker_enabled():
-    #     if is_databroker_producer_app():
-    #         jmx_check_conf_dir = os.path.join(get_user_checks_dir(), "jmx_1.d")
-
-    #         # kafka connect cfg
-    #         os.makedirs(
-    #             os.path.join(get_user_checks_dir(), "jmx_2.d"), exist_ok=True
-    #         )
-    #         kafka_connect_cfg = (
-    #             jmx_cfg_generator.generate_kafka_connect_jmx_config()
-    #         )
-    #         write_file(
-    #             os.path.join(get_user_checks_dir(), "jmx_2.d", "conf.yaml"),
-    #             kafka_connect_cfg,
-    #         )
-
-    #         # kafka streams cfg
-    #         os.makedirs(
-    #             os.path.join(get_user_checks_dir(), "jmx_3.d"), exist_ok=True
-    #         )
-    #         kafka_streams_cfg = (
-    #             jmx_cfg_generator.generate_kafka_streams_jmx_config()
-    #         )
-    #         write_file(
-    #             os.path.join(get_user_checks_dir(), "jmx_3.d", "conf.yaml"),
-    #             kafka_streams_cfg,
-    #         )
-    #     else:
-    #         extra_jmx_instance_config = consumer.jmx_metrics
-
     # Set up Datadog Java Trace Agent
     jmx_config_files.append(_get_jmx_conf_file())
     _set_up_dd_java_agent(

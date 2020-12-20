@@ -200,7 +200,7 @@ if __name__ == "__main__":
 
         nginx_process = nginx.run()
 
-        databroker_processes.run(m2ee.client, runtime.database.get_config())
+        databroker_processes.run(m2ee, runtime.database.get_config())
 
         def loop_until_process_dies():
             @backoff.on_predicate(backoff.constant, interval=10, logger=None)
