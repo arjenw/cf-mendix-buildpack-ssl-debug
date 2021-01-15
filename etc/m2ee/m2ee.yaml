@@ -23,6 +23,7 @@ m2ee:
       "-Djava.io.tmpdir=BUILD_PATH/data/tmp",
       "-XX:+HeapDumpOnOutOfMemoryError", 
       "-XX:HeapDumpPath=BUILD_PATH/data",
+      "-Xmx=2G"
     ]
 
   jetty:
